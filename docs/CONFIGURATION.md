@@ -18,7 +18,8 @@ GSD stores project settings in `.planning/config.json`. Created during `/gsd-new
   "model_overrides": {},
   "planning": {
     "commit_docs": true,
-    "search_gitignored": false
+    "search_gitignored": false,
+    "sub_repos": []
   },
   "context_profile": null,
   "workflow": {
@@ -45,7 +46,10 @@ GSD stores project settings in `.planning/config.json`. Created during `/gsd-new
     "code_review_command": null,
     "cross_ai_execution": false,
     "cross_ai_command": null,
-    "cross_ai_timeout": 300
+    "cross_ai_timeout": 300,
+    "security_enforcement": true,
+    "security_asvs_level": 1,
+    "security_block_on": "high"
   },
   "hooks": {
     "context_warnings": true,
@@ -80,9 +84,6 @@ GSD stores project settings in `.planning/config.json`. Created during `/gsd-new
     "always_confirm_external_services": true
   },
   "project_code": null,
-  "security_enforcement": true,
-  "security_asvs_level": 1,
-  "security_block_on": "high",
   "agent_skills": {},
   "response_language": null,
   "features": {
@@ -95,7 +96,7 @@ GSD stores project settings in `.planning/config.json`. Created during `/gsd-new
   "intel": {
     "enabled": false
   },
-  "claude_md_path": null
+  "claude_md_path": "./CLAUDE.md"
 }
 ```
 
@@ -111,7 +112,7 @@ GSD stores project settings in `.planning/config.json`. Created during `/gsd-new
 | `project_code` | string | any short string | (none) | Prefix for phase directory names (e.g., `"ABC"` produces `ABC-01-setup/`). Added in v1.31 |
 | `response_language` | string | language code | (none) | Language for agent responses (e.g., `"pt"`, `"ko"`, `"ja"`). Propagates to all spawned agents for cross-phase language consistency. Added in v1.32 |
 | `context_profile` | string | `dev`, `research`, `review` | (none) | Execution context preset that applies a pre-configured bundle of mode, model, and workflow settings for the current type of work. Added in v1.34 |
-| `claude_md_path` | string | any file path | (none) | Custom output path for the generated CLAUDE.md file. Useful for monorepos or projects that need CLAUDE.md in a non-root location. When set, GSD writes its CLAUDE.md content to this path instead of the project root. Added in v1.36 |
+| `claude_md_path` | string | any file path | `./CLAUDE.md` | Custom output path for the generated CLAUDE.md file. Useful for monorepos or projects that need CLAUDE.md in a non-root location. Defaults to `./CLAUDE.md` at the project root. Added in v1.36 |
 
 > **Note:** `granularity` was renamed from `depth` in v1.22.3. Existing configs are auto-migrated.
 
@@ -143,7 +144,7 @@ All workflow toggles follow the **absent = enabled** pattern. If a key is missin
 | `workflow.plan_bounce_script` | string | (none) | Path to the external script invoked for plan bounce validation. Receives the PLAN.md path as its first argument. Required when `plan_bounce` is `true`. Added in v1.36 |
 | `workflow.plan_bounce_passes` | number | `2` | Number of sequential bounce passes to run. Each pass feeds the previous pass's output back into the validator. Higher values increase rigor at the cost of latency. Added in v1.36 |
 | `workflow.code_review_command` | string | (none) | Shell command for external code review integration in `/gsd-ship`. Receives changed file paths via stdin. Non-zero exit blocks the ship workflow. Added in v1.36 |
-| `workflow.tdd_mode` | boolean | `false` | Enable TDD pipeline as a first-class execution mode. When `true`, the planner aggressively applies `type: tdd` to eligible tasks (business logic, APIs, validations, algorithms) and the executor enforces RED/GREEN/REFACTOR gate sequence. An end-of-phase collaborative review checkpoint verifies gate compliance. Added in v1.37 |
+| `workflow.tdd_mode` | boolean | `false` | Enable TDD pipeline as a first-class execution mode. When `true`, the planner aggressively applies `type: tdd` to eligible tasks (business logic, APIs, validations, algorithms) and the executor enforces RED/GREEN/REFACTOR gate sequence. An end-of-phase collaborative review checkpoint verifies gate compliance. Added in v1.36 |
 | `workflow.cross_ai_execution` | boolean | `false` | Delegate phase execution to an external AI CLI instead of spawning local executor agents. Useful for leveraging a different model's strengths for specific phases. Added in v1.36 |
 | `workflow.cross_ai_command` | string | (none) | Shell command template for cross-AI execution. Receives the phase prompt via stdin. Must produce SUMMARY.md-compatible output. Required when `cross_ai_execution` is `true`. Added in v1.36 |
 | `workflow.cross_ai_timeout` | number | `300` | Timeout in seconds for cross-AI execution commands. Prevents runaway external processes. Added in v1.36 |
@@ -164,6 +165,7 @@ All workflow toggles follow the **absent = enabled** pattern. If a key is missin
 |---------|------|---------|-------------|
 | `planning.commit_docs` | boolean | `true` | Whether `.planning/` files are committed to git |
 | `planning.search_gitignored` | boolean | `false` | Add `--no-ignore` to broad searches to include `.planning/` |
+| `planning.sub_repos` | array of strings | `[]` | Paths of nested sub-repos relative to the project root. When set, GSD-aware tooling scopes phase-lookup, path-resolution, and commit operations per sub-repo instead of treating the outer repo as a monorepo |
 
 ### Auto-Detection
 
@@ -265,6 +267,14 @@ Toggle optional capabilities via the `features.*` config namespace. Feature flag
 | `features.thinking_partner` | boolean | `false` | Enable thinking partner analysis at workflow decision points |
 | `features.global_learnings` | boolean | `false` | Enable cross-project learnings pipeline (auto-copy at phase completion, planner injection) |
 | `intel.enabled` | boolean | `false` | Enable queryable codebase intelligence system. When `true`, `/gsd-intel` commands build and query a JSON index in `.planning/intel/`. Added in v1.34 |
+
+<a id="graphify-settings"></a>
+### Graphify Settings
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `graphify.enabled` | boolean | `false` | Enable the project knowledge graph. When `true`, `/gsd-graphify` builds and queries a graph in `.planning/graphs/`. Added in v1.36 |
+| `graphify.build_timeout` | number (seconds) | `300` | Maximum seconds allowed for a `/gsd-graphify build` run before it aborts. Added in v1.36 |
 
 ### Usage
 
@@ -368,13 +378,13 @@ Control confirmation prompts during workflows.
 
 ## Security Settings
 
-Settings for the security enforcement feature (v1.31). All follow the **absent = enabled** pattern.
+Settings for the security enforcement feature (v1.31). All follow the **absent = enabled** pattern. These keys live under `workflow.*` in `.planning/config.json` — matching the shipped template and the runtime reads in `workflows/plan-phase.md`, `workflows/execute-phase.md`, `workflows/secure-phase.md`, and `workflows/verify-work.md`.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `security_enforcement` | boolean | `true` | Enable threat-model-anchored security verification via `/gsd-secure-phase`. When `false`, security checks are skipped entirely |
-| `security_asvs_level` | number (1-3) | `1` | OWASP ASVS verification level. Level 1 = opportunistic, Level 2 = standard, Level 3 = comprehensive |
-| `security_block_on` | string | `"high"` | Minimum severity that blocks phase advancement. Options: `"high"`, `"medium"`, `"low"` |
+| `workflow.security_enforcement` | boolean | `true` | Enable threat-model-anchored security verification via `/gsd-secure-phase`. When `false`, security checks are skipped entirely |
+| `workflow.security_asvs_level` | number (1-3) | `1` | OWASP ASVS verification level. Level 1 = opportunistic, Level 2 = standard, Level 3 = comprehensive |
+| `workflow.security_block_on` | string | `"high"` | Minimum severity that blocks phase advancement. Options: `"high"`, `"medium"`, `"low"` |
 
 ---
 
@@ -454,6 +464,14 @@ Invalid flag tokens are sanitized and logged as warnings. Only recognized GSD fl
 | gsd-plan-checker | Sonnet | Sonnet | Haiku | Inherit |
 | gsd-integration-checker | Sonnet | Sonnet | Haiku | Inherit |
 | gsd-nyquist-auditor | Sonnet | Sonnet | Haiku | Inherit |
+| gsd-pattern-mapper | Sonnet | Sonnet | Haiku | Inherit |
+| gsd-ui-researcher | Opus | Sonnet | Haiku | Inherit |
+| gsd-ui-checker | Sonnet | Sonnet | Haiku | Inherit |
+| gsd-ui-auditor | Sonnet | Sonnet | Haiku | Inherit |
+| gsd-doc-writer | Opus | Sonnet | Haiku | Inherit |
+| gsd-doc-verifier | Sonnet | Sonnet | Haiku | Inherit |
+
+> **Fallback semantics for unlisted agents.** The profiles table above covers 18 of 31 shipped agents. Agents without an explicit profile row (`gsd-advisor-researcher`, `gsd-assumptions-analyzer`, `gsd-security-auditor`, `gsd-user-profiler`, and the nine advanced agents — `gsd-ai-researcher`, `gsd-domain-researcher`, `gsd-eval-planner`, `gsd-eval-auditor`, `gsd-framework-selector`, `gsd-code-reviewer`, `gsd-code-fixer`, `gsd-debug-session-manager`, `gsd-intel-updater`) inherit the runtime default model for the selected profile. To pin a specific model for any of these agents, use `model_overrides` (next section) — `model_overrides` accepts any shipped agent name regardless of whether it has a profile row here. The authoritative profile table lives in `get-shit-done/bin/lib/model-profiles.cjs`; the authoritative 31-agent roster lives in [`docs/INVENTORY.md`](INVENTORY.md).
 
 ### Per-Agent Overrides
 
