@@ -180,10 +180,34 @@ Quick tasks can run mid-phase - validation only checks ROADMAP.md exists, not ph
 
 **If `branch_name` is empty/null:** Skip and continue on the current branch.
 
-**If `branch_name` is set:** Check out the quick-task branch before any planning commits:
+**If `branch_name` is set:** Check out the quick-task branch before any planning commits.
+
+The new branch must fork off the project's default branch (`origin/HEAD`), not
+off whatever HEAD happens to be checked out — otherwise consecutive quick tasks
+compound on top of each other and stay unpushed (#2916). If `$branch_name`
+already exists locally, reuse it as-is so resumed work is not rebased.
 
 ```bash
-git checkout -b "$branch_name" 2>/dev/null || git checkout "$branch_name"
+DEFAULT_BRANCH=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+DEFAULT_BRANCH=${DEFAULT_BRANCH:-main}
+
+if git show-ref --verify --quiet "refs/heads/$branch_name"; then
+  git switch "$branch_name"
+else
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "WARNING: Uncommitted changes present. Commit or stash before starting a new quick task so it branches off $DEFAULT_BRANCH cleanly. Falling back to current HEAD as base."
+    git checkout -b "$branch_name"
+  else
+    git fetch --quiet origin "$DEFAULT_BRANCH" 2>/dev/null || true
+    git switch "$DEFAULT_BRANCH" 2>/dev/null && git merge --ff-only "origin/$DEFAULT_BRANCH" 2>/dev/null
+    git checkout -b "$branch_name"
+  fi
+fi
+
+INHERITED=$(git rev-list --count "${DEFAULT_BRANCH}..HEAD" 2>/dev/null || echo "?")
+if [ "$INHERITED" != "0" ] && [ "$INHERITED" != "?" ]; then
+  echo "WARNING: Quick-task branch '$branch_name' contains $INHERITED commit(s) inherited from a non-default base. Verify this is intentional before continuing."
+fi
 ```
 
 All quick-task commits for this run stay on that branch. User handles merge/rebase afterward.

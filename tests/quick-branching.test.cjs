@@ -26,7 +26,20 @@ describe('quick workflow: branching support', () => {
   test('workflow includes quick-task branching step', () => {
     content = fs.readFileSync(workflowPath, 'utf-8');
     assert.ok(content.includes('Step 2.5: Handle quick-task branching'));
-    assert.ok(content.includes('git checkout -b "$branch_name" 2>/dev/null || git checkout "$branch_name"'));
+    // Branching block must (a) honour the existing branch if present and
+    // (b) create new branches off origin/HEAD, not current HEAD (#2916).
+    assert.ok(
+      content.includes('git switch "$branch_name"'),
+      'should reuse existing branch via git switch'
+    );
+    assert.ok(
+      content.includes('refs/remotes/origin/HEAD'),
+      'should detect default branch from origin/HEAD instead of branching off current HEAD'
+    );
+    assert.ok(
+      content.includes('git checkout -b "$branch_name"'),
+      'should create new branch via git checkout -b after switching to default'
+    );
   });
 
   test('branching step runs before task directory creation', () => {

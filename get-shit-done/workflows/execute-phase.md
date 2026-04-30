@@ -217,9 +217,34 @@ Check `branching_strategy` from init:
 
 **"none":** Skip, continue on current branch.
 
-**"phase" or "milestone":** Use pre-computed `branch_name` from init:
+**"phase" or "milestone":** Use pre-computed `branch_name` from init.
+
+The new phase branch must fork off the project's default branch (`origin/HEAD`),
+not off whatever HEAD happens to be checked out — otherwise consecutive phases
+compound on top of each other and stay unpushed (#2916). If `$BRANCH_NAME`
+already exists locally, reuse it as-is so resumed work is not rebased.
+
 ```bash
-git checkout -b "$BRANCH_NAME" 2>/dev/null || git checkout "$BRANCH_NAME"
+DEFAULT_BRANCH=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+DEFAULT_BRANCH=${DEFAULT_BRANCH:-main}
+
+if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+  git switch "$BRANCH_NAME"
+else
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "WARNING: Uncommitted changes present. Commit or stash before starting a new phase so it branches off $DEFAULT_BRANCH cleanly. Falling back to current HEAD as base."
+    git checkout -b "$BRANCH_NAME"
+  else
+    git fetch --quiet origin "$DEFAULT_BRANCH" 2>/dev/null || true
+    git switch "$DEFAULT_BRANCH" 2>/dev/null && git merge --ff-only "origin/$DEFAULT_BRANCH" 2>/dev/null
+    git checkout -b "$BRANCH_NAME"
+  fi
+fi
+
+INHERITED=$(git rev-list --count "${DEFAULT_BRANCH}..HEAD" 2>/dev/null || echo "?")
+if [ "$INHERITED" != "0" ] && [ "$INHERITED" != "?" ]; then
+  echo "WARNING: Phase branch '$BRANCH_NAME' contains $INHERITED commit(s) inherited from a non-default base. Verify this is intentional before continuing."
+fi
 ```
 
 All subsequent commits go to this branch. User handles merging.
