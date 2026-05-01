@@ -194,17 +194,35 @@ DEFAULT_BRANCH=${DEFAULT_BRANCH:-main}
 if git show-ref --verify --quiet "refs/heads/$branch_name"; then
   git switch "$branch_name"
 else
-  if [ -n "$(git status --porcelain)" ]; then
-    echo "WARNING: Uncommitted changes present. Commit or stash before starting a new quick task so it branches off $DEFAULT_BRANCH cleanly. Falling back to current HEAD as base."
-    git checkout -b "$branch_name"
-  else
-    git fetch --quiet origin "$DEFAULT_BRANCH" 2>/dev/null || true
-    git switch "$DEFAULT_BRANCH" 2>/dev/null && git merge --ff-only "origin/$DEFAULT_BRANCH" 2>/dev/null
-    git checkout -b "$branch_name"
+  # Fetch the default branch so origin/$DEFAULT_BRANCH is current. If the fetch
+  # fails (offline, no remote, auth failure) AND we have no local copy of
+  # origin/$DEFAULT_BRANCH to fall back on, abort — creating the branch off
+  # arbitrary HEAD is exactly the bug #2916 fixed.
+  if ! git fetch --quiet origin "$DEFAULT_BRANCH"; then
+    if ! git show-ref --verify --quiet "refs/remotes/origin/$DEFAULT_BRANCH"; then
+      echo "ERROR: Could not fetch origin/$DEFAULT_BRANCH and no local copy exists. Refusing to create '$branch_name' off the current HEAD (#2916). Resolve the remote/network issue and retry." >&2
+      exit 1
+    fi
+    echo "WARNING: git fetch origin $DEFAULT_BRANCH failed; using the local copy of origin/$DEFAULT_BRANCH as base." >&2
   fi
+
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "WARNING: Uncommitted changes present. Carrying them onto the new quick-task branch — they will be branched off origin/$DEFAULT_BRANCH (not the previous-task HEAD)."
+  else
+    # Best-effort: fast-forward the local default branch so subsequent local
+    # work sees the latest tip. Failure here is non-fatal because we always
+    # create the new branch directly from origin/$DEFAULT_BRANCH below.
+    git switch --quiet "$DEFAULT_BRANCH" 2>/dev/null \
+      && git merge --ff-only --quiet "origin/$DEFAULT_BRANCH" 2>/dev/null \
+      || true
+  fi
+
+  # Always pin the new branch to origin/$DEFAULT_BRANCH so the start point is
+  # deterministic regardless of which branch we are currently on (#2916).
+  git checkout -b "$branch_name" "origin/$DEFAULT_BRANCH"
 fi
 
-INHERITED=$(git rev-list --count "${DEFAULT_BRANCH}..HEAD" 2>/dev/null || echo "?")
+INHERITED=$(git rev-list --count "origin/${DEFAULT_BRANCH}..HEAD" 2>/dev/null || echo "?")
 if [ "$INHERITED" != "0" ] && [ "$INHERITED" != "?" ]; then
   echo "WARNING: Quick-task branch '$branch_name' contains $INHERITED commit(s) inherited from a non-default base. Verify this is intentional before continuing."
 fi
